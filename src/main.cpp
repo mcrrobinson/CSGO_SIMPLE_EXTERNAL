@@ -1,12 +1,19 @@
 #include <iostream>
 #include <Windows.h>
 #include <TlHelp32.h>
-#include "csgo.h"
+#include "setting_off.h"
+#include <d3dx9.h>
+#include <xmmintrin.h>
+
+#define PI 3.1415926535f
 
 using namespace counterpose::vernets;
 using namespace counterpose::signatuars;
+using namespace std;
 
 uintptr_t module_base_addr;
+uintptr_t engine;
+DWORD client_state;
 DWORD process_identification;
 HWND window_handle;
 HANDLE process_handle;
@@ -27,15 +34,29 @@ uintptr_t GetModuleBaseAddress(const char* modName) {
 	}
 }
 
-template<typename T> T RPM(SIZE_T address) {
+// Used to read memory, function to simplify.
+template<typename T> 
+T read_memory_glow(SIZE_T address) {
 	T buffer;
 	ReadProcessMemory(process_handle, (LPCVOID)address, &buffer, sizeof(T), NULL);
 	return buffer;
 }
 
-template<typename T> void WPM(SIZE_T address, T buffer) {
+// This is used to write processes to memory, just to simplifiy
+template<typename T> 
+void write_memory_glow(SIZE_T address, T buffer) {
 	WriteProcessMemory(process_handle, (LPVOID)address, &buffer, sizeof(buffer), NULL);
 }
+
+template <class dataType>
+void write_memory_aim(dataType value, DWORD addy)
+{
+	WriteProcessMemory(process_handle, (PVOID)addy, &value, sizeof(dataType), 0);
+}
+
+struct Matrix3x4_t{
+	float Matrix[3][4];
+};
 
 struct glowStructEnemy {
 	float red = 1.f;
@@ -64,7 +85,7 @@ struct glowStructLocal {
 }glowLocal;
 
 uintptr_t getLocalPlayer() {
-	return RPM<uintptr_t>(module_base_addr + dwLocalPlayer);
+	return read_memory_glow<uintptr_t>(module_base_addr + dwLocalPlayer);
 }
 
 int main() {
@@ -74,35 +95,59 @@ int main() {
 
 	// This is the DLL that has to be injected into.
 	module_base_addr = GetModuleBaseAddress("client_panorama.dll");
+	engine = GetModuleBaseAddress("engine.dll");
 	process_handle = OpenProcess(PROCESS_ALL_ACCESS, FALSE, process_identification);
+	client_state = read_memory_glow<DWORD>(engine + dwClientState);
 
+	int flash_disable = 0;
+	int ray_enabled = 0;
 
 	// If the End key is hit the script will close.
-	while (!GetAsyncKeyState(VK_END)){
+	while (!GetKeyState(VK_END)){
 
-		// If the Delete key is hit this will toggle the wallstuff.
+		// If the Delete key is hit this will toggle the rays.
 		if (GetKeyState(VK_DELETE) & 1){
+			if(ray_enabled == 0){ cout << "[SUCESS] Rays are now enabled." << endl; }
+			ray_enabled = 1;
 			
-			uintptr_t dwGlowManager = RPM<uintptr_t>(module_base_addr + dwGlowObjectManager);
-			int LocalTeam = RPM<int>(getLocalPlayer() + m_iTeamNum);
+			// Main script that starts the ray.
+			uintptr_t dwGlowManager = read_memory_glow<uintptr_t>(module_base_addr + dwGlowObjectManager);
+			int LocalTeam = read_memory_glow<int>(getLocalPlayer() + m_iTeamNum);
 
 			for (int i = 1; i < 32; i++) {
-				uintptr_t dwEntity = RPM<uintptr_t>(module_base_addr + dwEntityList + i * 0x10);
-				int iGlowIndx = RPM<int>(dwEntity + m_iGlowIndex);
-				int EnmHealth = RPM<int>(dwEntity + m_iHealth); if (EnmHealth < 1 || EnmHealth > 100) continue;
-				int Dormant = RPM<int>(dwEntity + m_bDormant); if (Dormant) continue;
+				uintptr_t dwEntity = read_memory_glow<uintptr_t>(module_base_addr + dwEntityList + i * 0x10);
+				int iGlowIndx = read_memory_glow<int>(dwEntity + m_iGlowIndex);
+				int EnmHealth = read_memory_glow<int>(dwEntity + m_iHealth); if (EnmHealth < 1 || EnmHealth > 100) continue;
+				int Dormant = read_memory_glow<int>(dwEntity + m_bDormant); if (Dormant) continue;
 
-				int EntityTeam = RPM<int>(dwEntity + m_iTeamNum);
+				int EntityTeam = read_memory_glow<int>(dwEntity + m_iTeamNum);
 
-				if (LocalTeam == EntityTeam)
-				{
-					WPM<glowStructLocal>(dwGlowManager + (iGlowIndx * 0x38) + 0x4, glowLocal);
+				if (LocalTeam == EntityTeam){
+					write_memory_glow<glowStructLocal>(dwGlowManager + (iGlowIndx * 0x38) + 0x4, glowLocal);
 				}
-				else if (LocalTeam != EntityTeam)
-				{
-					WPM<glowStructEnemy>(dwGlowManager + (iGlowIndx * 0x38) + 0x4, glowEnm);
+				else if (LocalTeam != EntityTeam){
+					write_memory_glow<glowStructEnemy>(dwGlowManager + (iGlowIndx * 0x38) + 0x4, glowEnm);
 				}
 			}
+		} 
+		if (!GetKeyState(VK_DELETE) & 1) {
+			if(ray_enabled == 1){ cout << "[SUCESS] Rays are now disabled." << endl; }
+			ray_enabled = 0;
+		}
+
+		if (GetKeyState(VK_HOME) & 1){
+			if(flash_disable == 0){ cout << "[SUCESS] Flashs are now disabled." << endl; }
+			flash_disable = 1;
+
+			int flash_duration;
+			flash_duration = read_memory_glow<int>(getLocalPlayer() + m_flFlashDuration);
+			if(flash_duration > 0){
+				write_memory_glow<int>(getLocalPlayer() + m_flFlashDuration, 0);
+			}
+		}
+		if (!GetKeyState(VK_HOME) & 1) {
+			if(flash_disable == 1){ cout << "[SUCESS] Flashes are enabled again." << endl; }
+			flash_disable = 0;
 		}
 	}
 }
